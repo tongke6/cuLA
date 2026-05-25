@@ -58,6 +58,7 @@ from cula.kda import chunk_kda as cula_chunk_kda
 # Constants
 # ============================================================
 H, D = 64, 128
+HV = H
 WARMUP = 10
 N_ITERS = 30
 NCU_MODE = False
@@ -102,7 +103,7 @@ def check_determinism(H=4, total_T=8192, num_seqs=10, iters=10000):
     seq_lens = generate_balanced_seqlens(total_T, num_seqs)
     cu_seqlens = torch.tensor(exclusive_cumsum(seq_lens), dtype=torch.int32, device=device)
 
-    inputs = prepare_safe_gate_inputs(1, total_T, H, D, device, cu_seqlens=cu_seqlens)
+    inputs = prepare_safe_gate_inputs(1, total_T, H, D, device, cu_seqlens=cu_seqlens, num_v_heads=HV)
     q, k, v, g, beta = inputs["q"], inputs["k"], inputs["v"], inputs["g"], inputs["beta"]
     A_log, dt_bias = inputs["A_log"], inputs["dt_bias"]
     scale, init_state, lower_bound = inputs["scale"], inputs["init_state"], inputs["lower_bound"]
@@ -150,7 +151,7 @@ def bench_fixed(configs):
         seq_lens = [T] * B
         cu_seqlens = torch.tensor(exclusive_cumsum(seq_lens), dtype=torch.int32, device=device)
 
-        inputs = prepare_safe_gate_inputs(B, T, H, D, device, cu_seqlens=cu_seqlens)
+        inputs = prepare_safe_gate_inputs(B, T, H, D, device, cu_seqlens=cu_seqlens, num_v_heads=HV)
         q, k, v, g, beta = inputs["q"], inputs["k"], inputs["v"], inputs["g"], inputs["beta"]
         A_log, dt_bias = inputs["A_log"], inputs["dt_bias"]
         scale, init_state, lower_bound = inputs["scale"], inputs["init_state"], inputs["lower_bound"]
@@ -235,7 +236,7 @@ def bench_varlen(configs):
         T = total_len
         cu_seqlens = torch.tensor(exclusive_cumsum(seq_lens), dtype=torch.int32, device=device)
 
-        inputs = prepare_safe_gate_inputs(1, T, H, D, device, cu_seqlens=cu_seqlens)
+        inputs = prepare_safe_gate_inputs(1, T, H, D, device, cu_seqlens=cu_seqlens, num_v_heads=HV)
         q, k, v, g, beta = inputs["q"], inputs["k"], inputs["v"], inputs["g"], inputs["beta"]
         A_log, dt_bias = inputs["A_log"], inputs["dt_bias"]
         scale, init_state, lower_bound = inputs["scale"], inputs["init_state"], inputs["lower_bound"]
@@ -329,14 +330,14 @@ def print_report(fixed_results, varlen_results):
         print("\n  [Fixed-Length]")
         print(f"  {'─' * 85}")
         print(
-            f"  {'B':>3s}  {'T':>5s}  │  {'rel_rmse':>18s}  {'rel_max':>10s}"
+            f"  {'B':>3s}  {'T':>5s}  │  {'rel_rmse':>10s}  {'rel_max':>10s}"
             f"  │  {'FLA(ms)':>9s}  {'cuLA(ms)':>11s}  {'Speedup':>8s}"
         )
         print(f"  {'─' * 85}")
         for r in fixed_results:
             print(
                 f"  {r['B']:3d}  {r['T']:5d}  │  "
-                f"{r['relative_rms_error']:18.6f}  {r['rel_max']:10.6f}  │  "
+                f"{r['relative_rms_error']:10.6f}  {r['rel_max']:10.6f}  │  "
                 f"{r['ms_fla']:9.4f}  {r['ms_cula']:11.4f}  {r['speedup']:7.2f}x"
             )
         print(f"  {'─' * 85}")
@@ -345,13 +346,13 @@ def print_report(fixed_results, varlen_results):
         print("\n  [Varlen]")
         print(f"  {'─' * 100}")
         print(
-            f"  {'Config':>45s}  │  {'rel_rmse':>18s}  {'rel_max':>10s}  │  {'FLA(ms)':>9s}  {'cuLA(ms)':>11s}  {'Speedup':>8s}"
+            f"  {'Config':>45s}  │  {'rel_rmse':>10s}  {'rel_max':>10s}  │  {'FLA(ms)':>9s}  {'cuLA(ms)':>11s}  {'Speedup':>8s}"
         )
         print(f"  {'─' * 100}")
         for r in varlen_results:
             print(
                 f"  {r['tag']:>45s}  │  "
-                f"{r['relative_rms_error']:18.6f}  {r['rel_max']:10.6f}  │  "
+                f"{r['relative_rms_error']:10.6f}  {r['rel_max']:10.6f}  │  "
                 f"{r['ms_fla']:9.4f}  {r['ms_cula']:11.4f}  {r['speedup']:7.2f}x"
             )
         print(f"  {'─' * 100}")
@@ -386,9 +387,23 @@ def main():
         action="store_true",
         help="Disable recompute in both FLA and cuLA (pre-compute QG)",
     )
+    global H
+    parser.add_argument(
+        "--heads",
+        type=int,
+        default=H,
+        help=f"Number of Q/K heads (H). Default: {H}",
+    )
+    parser.add_argument(
+        "--hv",
+        type=int,
+        default=None,
+        help="Number of V heads (HV). Default: same as H (no GVA). Set HV > H to run in GVA mode.",
+    )
     args = parser.parse_args()
 
     global NCU_MODE, SANITIZER_MODE, DISABLE_RECOMPUTE
+    H = args.heads
     if args.ncu:
         NCU_MODE = True
         print("[NCU mode] warmup=1, iters=1")
@@ -398,6 +413,13 @@ def main():
     if args.disable_recompute:
         DISABLE_RECOMPUTE = True
         print("[Disable recompute] pre-compute QG in forward")
+    HV = H
+    if args.hv is not None:
+        if args.hv < H or args.hv % H != 0:
+            raise ValueError(f"--hv must be a positive multiple of H ({H}), got {args.hv}")
+        HV = args.hv
+        if HV > H:
+            print(f"[GVA] HV={HV} (H={H}, ratio={HV // H}x)")
 
     fixed_configs = [
         # (B, T)

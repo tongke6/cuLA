@@ -32,7 +32,6 @@ import torch
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 os.environ.setdefault("FLA_USE_FAST_OPS", os.getenv("CULA_USE_FAST_MATH", "1"))  # Enable fast ops in FLA for fair comparison
 
-from fla.ops.kda.chunk_intra import chunk_kda_fwd_intra as fla_chunk_kda_fwd_intra
 from fla.ops.kda.wy_fast import recompute_w_u_fwd as fla_recompute_w_u_fwd
 
 import cula.cudac as cula_cuda
@@ -49,7 +48,7 @@ from cula.kda.chunk_intra import chunk_kda_fwd_intra as cula_chunk_kda_fwd_intra
 
 # Constant params
 B, H, D = 2, 64, 128
-HV = H   # overridable via --hv; HV > H enables GVA mode
+HV = H  # overridable via --hv; HV > H enables GVA mode
 BT = 64  # chunk size
 
 # Varlen benchmark params
@@ -64,6 +63,7 @@ DISABLE_RECOMPUTE = False  # Whether to disable recompute (compute QG in forward
 def get_abs_err(ref: torch.Tensor, out: torch.Tensor) -> float:
     return (ref.float() - out.float()).abs().max().item()
 
+
 def prepare_recompute_wu_inputs(B, T, device, cu_seqlens=None, chunk_size=BT):
     """Prepare inputs for recompute_w_u benchmarking (handles both MHA and GVA).
 
@@ -75,9 +75,17 @@ def prepare_recompute_wu_inputs(B, T, device, cu_seqlens=None, chunk_size=BT):
     )
 
     _, _, _, _, _, Akk = cula_chunk_kda_fwd_intra(
-        q=q, k=k, v=v, gk=g, beta=beta, scale=scale,
-        cu_seqlens=cu_seqlens, chunk_size=chunk_size, chunk_indices=chunk_indices,
-        safe_gate=True, disable_recompute=False,
+        q=q,
+        k=k,
+        v=v,
+        gk=g,
+        beta=beta,
+        scale=scale,
+        cu_seqlens=cu_seqlens,
+        chunk_size=chunk_size,
+        chunk_indices=chunk_indices,
+        safe_gate=True,
+        disable_recompute=False,
     )
 
     return q, k, v, g, beta, Akk, cu_seqlens, chunk_indices
@@ -128,7 +136,7 @@ def benchmark_recompute_wu_uniform():
     )
     print("=" * 100)
     print(
-        f"{'B':>4} {'T':>7} │ {'rel_rmse':>18} {'rel_max':>10} {'mean_diff':>12} │ {'FLA(ms)':>9} {'cuLA(ms)':>9} {'Speedup':>8}"
+        f"{'B':>4} {'T':>7} │ {'rel_rmse':>10} {'rel_max':>10} {'mean_diff':>12} │ {'FLA(ms)':>9} {'cuLA(ms)':>9} {'Speedup':>8}"
     )
     print("─" * 100)
 
@@ -150,7 +158,10 @@ def benchmark_recompute_wu_uniform():
 
         stats = {}
         for name, t_fla, t_cula in [
-            ("w", w_fla, w_cula), ("u", u_fla, u_cula), ("qg", qg_fla, qg_cula), ("kg", kg_fla, kg_cula),
+            ("w", w_fla, w_cula),
+            ("u", u_fla, u_cula),
+            ("qg", qg_fla, qg_cula),
+            ("kg", kg_fla, kg_cula),
         ]:
             if t_fla is not None and t_cula is not None:
                 stats[name] = relative_rms_error_rel_max_mean_abs_rhs(t_fla, t_cula)
@@ -169,7 +180,7 @@ def benchmark_recompute_wu_uniform():
         speedup = ms_fla / ms_cula if ms_cula > 0 else float("inf")
 
         print(
-            f"{B:>4} {T:>7} │ {relative_rms_error_value:>18.6f} {rel_max:>10.6f} {mean_diff:>12.8f} │ {ms_fla:>9.4f} {ms_cula:>9.4f} {speedup:>7.2f}x"
+            f"{B:>4} {T:>7} │ {relative_rms_error_value:>10.6f} {rel_max:>10.6f} {mean_diff:>12.8f} │ {ms_fla:>9.4f} {ms_cula:>9.4f} {speedup:>7.2f}x"
         )
 
     print("─" * 100)
@@ -193,7 +204,7 @@ def benchmark_recompute_wu_varlen():
     )
     print("=" * 110)
     print(
-        f"{'total_len':>10} │ {'rel_rmse':>18} {'rel_max':>10} {'mean_diff':>12} │ {'FLA(ms)':>9} {'cuLA(ms)':>9} {'Speedup':>8}"
+        f"{'total_len':>10} │ {'rel_rmse':>10} {'rel_max':>10} {'mean_diff':>12} │ {'FLA(ms)':>9} {'cuLA(ms)':>9} {'Speedup':>8}"
     )
     print("─" * 110)
 
@@ -216,7 +227,10 @@ def benchmark_recompute_wu_varlen():
 
         stats = {}
         for name, t_fla, t_cula in [
-            ("w", w_fla, w_cula), ("u", u_fla, u_cula), ("qg", qg_fla, qg_cula), ("kg", kg_fla, kg_cula),
+            ("w", w_fla, w_cula),
+            ("u", u_fla, u_cula),
+            ("qg", qg_fla, qg_cula),
+            ("kg", kg_fla, kg_cula),
         ]:
             if t_fla is not None and t_cula is not None:
                 stats[name] = relative_rms_error_rel_max_mean_abs_rhs(t_fla, t_cula)
@@ -235,7 +249,7 @@ def benchmark_recompute_wu_varlen():
         speedup = ms_fla / ms_cula if ms_cula > 0 else float("inf")
 
         print(
-            f"{total_len:>10} │ {relative_rms_error_value:>18.6f} {rel_max:>10.6f} {mean_diff:>12.8f} │ {ms_fla:>9.4f} {ms_cula:>9.4f} {speedup:>7.2f}x"
+            f"{total_len:>10} │ {relative_rms_error_value:>10.6f} {rel_max:>10.6f} {mean_diff:>12.8f} │ {ms_fla:>9.4f} {ms_cula:>9.4f} {speedup:>7.2f}x"
         )
 
     print("─" * 110)
@@ -297,7 +311,7 @@ if __name__ == "__main__":
         "--hv",
         type=int,
         default=None,
-        help=f"Override number of V heads (HV). Default: H (no GVA). Set HV > H to enable GVA mode.",
+        help="Override number of V heads (HV). Default: H (no GVA). Set HV > H to enable GVA mode.",
     )
     args = parser.parse_args()
 
