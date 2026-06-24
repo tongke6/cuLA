@@ -61,7 +61,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3.12 -m pip install --no-cache-dir --upgrade pip
-          python3.12 -m pip install --no-cache-dir torch --index-url ${{ matrix.cuda == 'cu129' && 'https://download.pytorch.org/whl/cu129' || 'https://download.pytorch.org/whl/cu130' }}
+          python3.12 -m pip install --no-cache-dir torch==2.9.1 --index-url ${{ matrix.cuda == 'cu129' && 'https://download.pytorch.org/whl/cu129' || 'https://download.pytorch.org/whl/cu130' }}
           python3.12 -m pip install --no-cache-dir setuptools wheel "setuptools_scm>=6.0" build ninja auditwheel patchelf
 
       - name: Compute version
