@@ -69,11 +69,17 @@ jobs:
         # torch's pip wheels bundle cuDNN inside site-packages/nvidia/*/lib/,
         # which is not on the linker search path — add it so torch._C can load.
         run: |
-          echo "LD_LIBRARY_PATH=$(python3.12 -c '
-          import site, os
-          print(":".join(p for sp in site.getsitepackages()
-            for p in [sp + "/torch/lib"] + __import__("glob").glob(sp + "/nvidia/*/lib")
-            if os.path.isdir(p)))${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}")" >> "$GITHUB_ENV"
+          LIB_DIRS="$(python3.12 <<'EOF'
+          import glob, os, site
+          dirs = []
+          for sp in site.getsitepackages():
+              for p in [os.path.join(sp, "torch", "lib")] + glob.glob(os.path.join(sp, "nvidia", "*", "lib")):
+                  if os.path.isdir(p):
+                      dirs.append(p)
+          print(":".join(dirs))
+          EOF
+          )"
+          echo "LD_LIBRARY_PATH=${LIB_DIRS}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Compute version
         id: version
