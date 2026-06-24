@@ -64,6 +64,37 @@ jobs:
           python3.12 -m pip install --no-cache-dir torch==2.9.1 --index-url ${{ matrix.cuda == 'cu129' && 'https://download.pytorch.org/whl/cu129' || 'https://download.pytorch.org/whl/cu130' }}
           python3.12 -m pip install --no-cache-dir setuptools wheel "setuptools_scm>=6.0" build ninja auditwheel patchelf
 
+      - name: Expose PyTorch CUDA libraries
+        run: |
+          python3.12 - <<'PY'
+          import os
+          import site
+          from pathlib import Path
+
+          library_dirs = []
+          for site_packages in map(Path, site.getsitepackages()):
+              torch_lib = site_packages / "torch" / "lib"
+              nvidia_libs = sorted(site_packages.glob("nvidia/*/lib"))
+              for path in [torch_lib, *nvidia_libs]:
+                  if path.is_dir():
+                      library_dirs.append(path)
+
+          if not library_dirs:
+              raise SystemExit("ERROR: no PyTorch CUDA library directories found")
+          if not any((path / "libcudnn.so.9").exists() for path in library_dirs):
+              raise SystemExit("ERROR: libcudnn.so.9 not found in PyTorch CUDA library directories")
+
+          current = os.environ.get("LD_LIBRARY_PATH")
+          ld_library_path = ":".join(map(str, library_dirs + ([current] if current else [])))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+              github_env.write(f"LD_LIBRARY_PATH={ld_library_path}\n")
+
+          print("LD_LIBRARY_PATH entries:")
+          for path in library_dirs:
+              print(f"  {path}")
+          PY
+
       - name: Compute version
         id: version
         run: |
